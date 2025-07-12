@@ -5,6 +5,7 @@ import SearchForm from './components/SearchForm';
 import FlightsTable from './components/FlightsTable';
 import PriceChart from './components/PriceChart';
 import InsightsPanel from './components/InsightsPanel';
+import WelcomePlaceholder from './components/WelcomePlaceholder';
 import Loader from './components/Loader';
 import Footer from './components/Footer';
 import { Plane, AlertTriangle } from 'lucide-react';
