@@ -1,16 +1,14 @@
 # backend/app/main.py
-# --- Imports ---
 import os
 import requests
 import google.generativeai as genai
 from fastapi import FastAPI, HTTPException, Depends
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 
 # --- Load Environment Variables ---
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
@@ -28,16 +26,6 @@ AMADEUS_SEARCH_URL = "https://test.api.amadeus.com/v2/shopping/flight-offers"
 
 # --- FastAPI App Initialization ---
 app = FastAPI()
-
-# --- CORS Middleware ---
-origins = ["http://localhost:3000", "http://localhost:5173"]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # --- Pydantic Models ---
 class FlightSearchRequest(BaseModel):
@@ -76,10 +64,6 @@ def get_amadeus_token():
         raise HTTPException(status_code=500, detail="Could not authenticate with flight data provider.")
 
 # --- API Endpoints ---
-@app.get("/")
-def read_root():
-    return {"message": "Airline Demand Analysis API is running."}
-
 @app.post("/api/search-flights")
 def search_flights(request: FlightSearchRequest, token: str = Depends(get_amadeus_token)):
     headers = {"Authorization": f"Bearer {token}"}
@@ -98,16 +82,13 @@ def search_flights(request: FlightSearchRequest, token: str = Depends(get_amadeu
         response = requests.get(AMADEUS_SEARCH_URL, headers=headers, params=params)
         response.raise_for_status()
         data = response.json()
-        
         carrier_codes = data.get("dictionaries", {}).get("carriers", {})
-
         cleaned_flights = []
         if "data" in data and data["data"]:
             for flight_offer in data["data"]:
                 itinerary = flight_offer["itineraries"][0]
                 segment = itinerary["segments"][0]
                 carrier_code = segment.get("carrierCode")
-                
                 cleaned_flights.append({
                     "id": flight_offer.get("id"),
                     "price": flight_offer["price"].get("total"),
@@ -119,9 +100,7 @@ def search_flights(request: FlightSearchRequest, token: str = Depends(get_amadeu
                     "airlineName": carrier_codes.get(carrier_code, "Unknown Airline"),
                     "duration": itinerary.get("duration"),
                 })
-        
         return cleaned_flights
-
     except requests.exceptions.HTTPError as http_err:
         raise HTTPException(status_code=http_err.response.status_code, detail=http_err.response.json())
     except Exception as e:
@@ -130,9 +109,8 @@ def search_flights(request: FlightSearchRequest, token: str = Depends(get_amadeu
 @app.post("/api/generate-insights")
 def generate_insights(request: InsightRequest):
     if not request.flightData:
-        return {"insights": "No flight data was provided, so no insights could be generated."}
+        return {"insights": "No flight data was provided."}
 
-    # *** UPDATED PROMPT: More explicit instructions to avoid extra text and markdown characters ***
     prompt = f"""
     Analyze the following flight data. Provide a market analysis for a hostel chain.
     Your response MUST be formatted in simple markdown and contain ONLY the analysis.
@@ -151,26 +129,19 @@ def generate_insights(request: InsightRequest):
     Flight Data:
     {request.flightData}
     """
-
     try:
         model = genai.GenerativeModel('gemini-2.5-pro')
         response = model.generate_content(prompt)
         insights = response.text.strip()
-        
         return {"insights": insights}
     except Exception as e:
         raise HTTPException(status_code=500, detail="Failed to generate insights from AI model.")
 
-
+# --- Serve Static Frontend Files ---
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
 
-# Mount the 'assets' directory from the React build.
-# The path "/assets" is what's used in the generated index.html.
 app.mount("/assets", StaticFiles(directory=os.path.join(STATIC_DIR, "assets")), name="assets")
 
-# Catch-all endpoint to serve the index.html for any other path.
-# This is crucial for client-side routing in React.
 @app.get("/{full_path:path}")
 async def serve_react_app(full_path: str):
-    """Serves the React app's index.html for any non-API, non-static file path."""
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
